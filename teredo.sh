@@ -13,10 +13,12 @@ then
             "000")
                 echo  "Err while connecting docker socket."
                 echo  "Are you mount right docker socket ?"
+                err_on_exit="yes"
             ;;
 
             "404")
                 echo "Container $container_name is not found."
+                err_on_exit="yes"
             ;;
 
             "200")
@@ -29,21 +31,26 @@ then
                     ln -s /proc2/$container_pid/ns/net /var/run/netns/container && echo "Link is created" || ( echo "Link is not created. Did you run this container with privileged ? "; exit 1)
                 else
                     echo "Your container is not running."
-                    exit 1
+                    echo "Exiting in 10 seconds."
+                    sleep 10
+                    exit 0
                 fi
             ;;
             
             *)
                 echo "Unknow response: $container_stat"
+                err_on_exit="yes"
             ;;
             esac
         else 
             echo "You are mounted Proc folder but you are not mount docker sock."
             echo "You can make a mount with -v /var/run/docker.sock:/var/run/docker.sock"
+            err_on_exit="yes"
         fi
     else
         echo "Second proc folder is not found."
         echo "Please mount second proc with docker with -v /proc/:/proc2"
+        err_on_exit="yes"
     fi
 fi
 
@@ -65,8 +72,10 @@ then
         echo "You are enable delete all default IPv6 route"
         $exec_command sysctl -w net.ipv6.conf.all.autoconf=0
         $exec_command sysctl -w net.ipv6.conf.all.accept_ra=0
+        echo > ipv6_route_backup.txt
         $exec_command ip -6 ro | grep default | while read IPv6_Route
         do
+            echo $IPv6_Route >> ipv6_route_backup.txt
             echo Deleting route: $IPv6_Route
             $exec_command ip -6 ro del $IPv6_Route || echo "While deleting route $IPv6_Route, an err occured."
         done
@@ -81,4 +90,28 @@ then
     sleep 5
     exit 1
 fi
+
+exit_trap() {
+if [ "$exit_is_done" != "true" ]
+then
+    if [ "$delro" == "yes" ]
+    then
+        if [ -f "/var/run/netns/container" ]
+        then
+            echo "Backing up IPv6 Routes"
+            $exec_command sysctl -w net.ipv6.conf.all.autoconf=1
+            $exec_command sysctl -w net.ipv6.conf.all.accept_ra=1
+            cat ipv6_route_backup.txt | grep default | while read IPv6_Route
+            do
+                echo Loading route: $IPv6_Route
+                $exec_command ip -6 ro add $IPv6_Route || echo "While adding route $IPv6_Route, an err occured."
+            done
+            rm ipv6_route_backup.txt 2> /dev/null
+        fi
+    fi
+fi
+exit_is_done="true"
+}
+
+trap exit_trap INT EXIT
 $exec_command miredo -f
