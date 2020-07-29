@@ -82,12 +82,20 @@ then
         $exec_command sysctl -w net.ipv6.conf.all.autoconf=0
         $exec_command sysctl -w net.ipv6.conf.all.accept_ra=0
         echo > ipv6_route_backup.txt
-        current_ip=$(curl ahmetozer.org/cdn-cgi/tracert -s | awk -v RS='\n' -F"=" '{ if ( $1 == "ip") {print $2 }}')
+        current_ip=$($exec_command curl ahmetozer.org/cdn-cgi/tracert -s | awk -v RS='\n' -F"=" '{ if ( $1 == "ip") {print $2 }}')
+        echo "Current IPv6 address : $current_ip"
         echo $current_ip > current_ip.txt
-        $exec_command ip -6 rule add from $current_ip table 200
-        $exec_command ip -6 ro | grep default | while read IPv6_Route
+        if [ ! -z "$current_ip" ]
+        then
+            $exec_command ip -6 ro  | while read IPv6_Route
+            do
+                $exec_command ip -6 ro add $IPv6_Route table 200 && echo "route added $IPv6_Route table 200"|| echo "While adding route from $current_ip with $IPv6_Route table 200, an err occured."
+            done
+            $exec_command ip -6 rule add to $current_ip table 200
+            $exec_command ip -6 rule add from $current_ip table 200
+        fi
+            $exec_command ip -6 ro | grep default | while read IPv6_Route
         do
-            $exec_command ip -6 ro add $IPv6_Route table 200 || echo "While adding route from $current_ip with $IPv6_Route table 200, an err occured."
             echo $IPv6_Route >> ipv6_route_backup.txt
             echo Deleting route: $IPv6_Route
             $exec_command ip -6 ro del $IPv6_Route || echo "While deleting route $IPv6_Route, an err occured."
@@ -107,7 +115,15 @@ then
             echo "Backing up IPv6 Routes"
             $exec_command sysctl -w net.ipv6.conf.all.autoconf=1
             $exec_command sysctl -w net.ipv6.conf.all.accept_ra=1
-            $exec_command ip -6 rule del from $current_ip table 200
+            if [ ! -z "$current_ip" ]
+            then
+                $exec_command ip -6 ro  | while read IPv6_Route
+                do
+                    $exec_command ip -6 ro del $IPv6_Route table 200 && echo "route deleted $IPv6_Route table 200"|| echo "While delete route from $current_ip with $IPv6_Route table 200, an err occured."
+                done
+                $exec_command ip -6 rule del to $current_ip table 200
+                $exec_command ip -6 rule del from $current_ip table 200
+            fi
             cat ipv6_route_backup.txt | grep default | while read IPv6_Route
             do
                 $exec_command ip -6 ro del $IPv6_Route table 200 || echo "While delete route from $current_ip with $IPv6_Route table 200, an err occured."
