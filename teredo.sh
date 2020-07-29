@@ -56,6 +56,7 @@ fi
 
 if [ -f "/var/run/netns/container" ]
 then
+    control_container="yes"
     exec_command="ip netns exec container"
 else
     exec_command=""
@@ -64,6 +65,14 @@ fi
 printf "Enabling IPv6 " ; $exec_command sysctl net.ipv6.conf.all.disable_ipv6=0 > /dev/null && echo "OK." || { echo "ERR"; err_on_exit="yes" ;}
 printf "Enabling IPv6 by default " ; $exec_command sysctl net.ipv6.conf.default.disable_ipv6=0 > /dev/null && echo "OK." || { echo "ERR"; err_on_exit="yes" ;}
 printf "Enabling IPv6 by local " ; $exec_command sysctl net.ipv6.conf.lo.disable_ipv6=0 > /dev/null && echo "OK." || { echo "ERR"; err_on_exit="yes" ;}
+
+
+if [ "$err_on_exit" == "yes" ]
+then
+    echo "System has a errors. Did you run this container with --privileged argument ?"
+    sleep 5
+    exit 1
+fi
 
 if [ "$delro" == "yes" ]
 then
@@ -82,13 +91,6 @@ then
     else
         echo "You are enable delete all default IPv6 route, but this function is disabled in HOST to preventing any connection issue"
     fi
-fi
-
-if [ "$err_on_exit" == "yes" ]
-then
-    echo "System has a errors. Did you run this container with --privileged argument ?"
-    sleep 5
-    exit 1
 fi
 
 exit_trap() {
@@ -114,4 +116,33 @@ exit_is_done="true"
 }
 
 trap exit_trap INT EXIT
+
+
+healt_check() {
+    err_count=0
+    while [ -f "/var/run/netns/container" ]
+    do
+    ip netns exec container ip addr show dev teredo > /dev/null 2>&1
+    if [ $? -eq 0 ]
+    then
+        err_count=0
+    else
+        err_count=$((err_count+1))
+        if [ "$err_count" -gt "15" ]
+        then
+            echo "System cannot access to teredo interface"
+            echo "This container is closed "
+            kill $1
+        fi
+    fi
+    
+    sleep 2
+    done
+    echo "Container $container_name is closing."
+    kill $1
+}
+if [ -f "/var/run/netns/container" ]
+then
+    healt_check $$ &
+fi
 $exec_command miredo -f
